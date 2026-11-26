@@ -1,0 +1,170 @@
+""" Quotes Scraper + Website Generator (NO pip install needed) Run: python
+quotes_app.py """ import csv import json import html import ssl import
+webbrowser import urllib.request from html.parser import HTMLParser from pathlib
+import Path BASE_URL = "https://quotes.toscrape.com" OUT_DIR =
+Path(__file__).resolve().parent # ---------- 1. Download a page ---------- def
+fetch(url): req = urllib.request.Request(url, headers={"User-Agent":
+"Mozilla/5.0"}) try: with urllib.request.urlopen(req, timeout=15) as r: return
+r.read().decode("utf-8") except ssl.SSLError: # Some Python installs (e.g.
+macOS) lack certificates; retry without checking ctx =
+ssl._create_unverified_context() with urllib.request.urlopen(req, timeout=15,
+context=ctx) as r: return r.read().decode("utf-8") # ---------- 2. Read the HTML
+---------- class QuoteParser(HTMLParser): def __init__(self):
+super().__init__(convert_charrefs=True) self.quotes = [] self.current = None
+self.capture = None # "text", "author" or "tag" self.buffer = [] self.in_next =
+False self.next_href = None def handle_starttag(self, tag, attrs): attrs =
+dict(attrs) classes = (attrs.get("class") or "").split() if tag == "div" and
+"quote" in classes: self._save_current() self.current = {"text": "", "author":
+"", "tags": []} elif tag == "span" and "text" in classes and self.current is not
+None: self.capture, self.buffer = "text", [] elif tag == "small" and "author" in
+classes and self.current is not None: self.capture, self.buffer = "author", []
+elif tag == "a" and "tag" in classes and self.current is not None: self.capture,
+self.buffer = "tag", [] elif tag == "li" and "next" in classes: self.in_next =
+True elif tag == "a" and self.in_next: self.next_href = attrs.get("href") def
+handle_data(self, data): if self.capture: self.buffer.append(data) def
+handle_endtag(self, tag): if self.capture and tag in ("span", "small", "a"):
+value = "".join(self.buffer).strip() if self.capture == "tag":
+self.current["tags"].append(value) else: self.current[self.capture] = value
+self.capture = None elif tag == "li": self.in_next = False def
+_save_current(self): if self.current and self.current["text"]:
+self.quotes.append(self.current) self.current = None def finish(self):
+self._save_current() def parse_page(page_html): parser = QuoteParser()
+parser.feed(page_html) parser.finish() return parser.quotes, parser.next_href #
+---------- 3. Scrape all pages ---------- def scrape_all(): quotes, page = [],
+"/page/1/" while page: url = BASE_URL + page print("Scraping:", url) found, page
+= parse_page(fetch(url)) quotes.extend(found) return quotes SAMPLE_QUOTES = [
+{"text": "\u201cThe world as we have created it is a process of our
+thinking.\u201d", "author": "Albert Einstein", "tags": ["change",
+"deep-thoughts", "thinking"]}, {"text": "\u201cIt is our choices, Harry, that
+show what we truly are.\u201d", "author": "J.K. Rowling", "tags": ["abilities",
+"choices"]}, {"text": "\u201cThe person, be it gentleman or lady, who has not
+pleasure in a good novel, must be intolerably stupid.\u201d", "author": "Jane
+Austen", "tags": ["aliteracy", "books", "classic", "humor"]}, ] # ---------- 4.
+Save files ---------- def save_csv(quotes): with open(OUT_DIR / "quotes.csv",
+"w", newline="", encoding="utf-8-sig") as f: w = csv.writer(f)
+w.writerow(["Quote", "Author", "Tags"]) for q in quotes: w.writerow([q["text"],
+q["author"], ", ".join(q["tags"])]) def save_json(quotes): (OUT_DIR /
+"quotes.json").write_text( json.dumps(quotes, indent=2, ensure_ascii=False),
+encoding="utf-8") def build_website(quotes, note=""): cards = "" for q in
+quotes: tags = "".join(f'<span class="tag">{html.escape(t)}</span>' for t in
+q["tags"]) cards += (f'
+<div class="card">
+  <p class="text">{html.escape(q["text"])}</p>
+  ' f'
+  <p class="author">\u2014 {html.escape(q["author"])}</p>
+  <div>{tags}</div>
+</div>
+\n') page = """<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>My Quotes Collection</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background: #f4f6f8;
+        margin: 0;
+        color: #222;
+      }
+      header {
+        background: #2c3e50;
+        color: #fff;
+        text-align: center;
+        padding: 30px 10px;
+      }
+      header h1 {
+        margin: 0 0 8px;
+      }
+      #search {
+        width: 90%;
+        max-width: 420px;
+        padding: 12px;
+        font-size: 16px;
+        border: none;
+        border-radius: 8px;
+        margin-top: 12px;
+      }
+      .container {
+        max-width: 900px;
+        margin: 25px auto;
+        padding: 0 15px;
+        display: grid;
+        gap: 16px;
+      }
+      .card {
+        background: #fff;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+      }
+      .text {
+        font-size: 19px;
+        font-style: italic;
+        margin: 0 0 10px;
+      }
+      .author {
+        font-weight: bold;
+        color: #2c3e50;
+        margin: 0 0 10px;
+      }
+      .tag {
+        display: inline-block;
+        background: #e1ecf4;
+        color: #39739d;
+        padding: 3px 10px;
+        border-radius: 12px;
+        font-size: 13px;
+        margin: 2px 4px 2px 0;
+      }
+      .note {
+        background: #fff3cd;
+        color: #664d03;
+        padding: 10px;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    __NOTE__
+    <header>
+      <h1>\U0001F4DA My Quotes Collection</h1>
+      <div id="count">__COUNT__ quotes</div>
+      <input
+        id="search"
+        type="text"
+        placeholder="Search by quote, author or tag..."
+      />
+    </header>
+    <div class="container">__CARDS__</div>
+    <script>
+      const s = document.getElementById("search"),
+        cards = document.querySelectorAll(".card"),
+        c = document.getElementById("count");
+      s.addEventListener("input", () => {
+        const t = s.value.toLowerCase();
+        let n = 0;
+        cards.forEach((x) => {
+          const m = x.innerText.toLowerCase().includes(t);
+          x.style.display = m ? "block" : "none";
+          if (m) n++;
+        });
+        c.textContent = n + " quotes";
+      });
+    </script>
+  </body>
+</html>
+""" note_html = f'
+<div class="note">{html.escape(note)}</div>
+' if note else "" page = (page.replace("__NOTE__", note_html)
+.replace("__COUNT__", str(len(quotes))) .replace("__CARDS__", cards)) path =
+OUT_DIR / "quotes_website.html" path.write_text(page, encoding="utf-8") return
+path # ---------- 5. Run everything ---------- def main(): note = "" try: quotes
+= scrape_all() if not quotes: raise RuntimeError("No quotes found on the page")
+except Exception as e: print("\nCould not download from the website:", e)
+print("Using 3 built-in sample quotes so you can still see the website.\n")
+quotes = SAMPLE_QUOTES note = "Offline mode: showing sample quotes (internet
+download failed)." print("Total quotes:", len(quotes)) save_csv(quotes)
+save_json(quotes) site = build_website(quotes, note) print("Files saved in:",
+OUT_DIR) webbrowser.open(site.as_uri()) print("Done! Website opened in your
+browser.") if __name__ == "__main__": main()
